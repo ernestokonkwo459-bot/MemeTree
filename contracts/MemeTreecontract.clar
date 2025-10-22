@@ -26,6 +26,11 @@
 (define-constant err-insufficient-payment (err u105))
 (define-constant err-transfer-failed (err u106))
 (define-constant err-invalid-royalty (err u107))
+(define-constant err-contract-paused (err u108))
+(define-constant err-rate-limit-exceeded (err u109))
+(define-constant err-overflow (err u110))
+(define-constant err-invalid-input (err u111))
+(define-constant err-underflow (err u112))
 
 ;; Platform fee (2%)
 (define-constant platform-fee u200)
@@ -37,11 +42,16 @@
 ;; Maximum generations for royalty distribution
 (define-constant max-royalty-generations u5)
 
+;; Rate limiting constants
+(define-constant RATE-LIMIT-BLOCKS u10)
+(define-constant MAX-OPERATIONS-PER-BLOCK u5)
+
 ;; data vars
 (define-data-var last-token-id uint u0)
 (define-data-var platform-treasury principal contract-owner)
 ;; temp variable used for list filtering predicates (see transfer-meme)
 (define-data-var temp-target-id uint u0)
+(define-data-var contract-paused bool false)
 
 ;; data maps
 (define-map meme-data
@@ -75,7 +85,75 @@
   uint
 )
 
+(define-map last-operation-block principal uint)
+(define-map operations-per-block {user: principal, block: uint} uint)
+
+;; Security helper functions
+(define-private (safe-add (a uint) (b uint))
+  (let ((result (+ a b)))
+    (asserts! (>= result a) err-overflow)
+    (ok result)
+  )
+)
+
+(define-private (safe-sub (a uint) (b uint))
+  (if (>= a b)
+    (ok (- a b))
+    err-underflow
+  )
+)
+
+(define-private (safe-mul (a uint) (b uint))
+  (let ((result (* a b)))
+    (asserts! (or (is-eq b u0) (is-eq (/ result b) a)) err-overflow)
+    (ok result)
+  )
+)
+
+(define-private (check-rate-limit (user principal))
+  (let (
+    (current-block burn-block-height)
+    (last-block (default-to u0 (map-get? last-operation-block user)))
+    (ops-count (default-to u0 (map-get? operations-per-block {user: user, block: current-block})))
+  )
+    (asserts! 
+      (or 
+        (>= (- current-block last-block) RATE-LIMIT-BLOCKS)
+        (< ops-count MAX-OPERATIONS-PER-BLOCK)
+      )
+      err-rate-limit-exceeded
+    )
+    (map-set last-operation-block user current-block)
+    (map-set operations-per-block {user: user, block: current-block} (+ ops-count u1))
+    (ok true)
+  )
+)
+
+(define-private (validate-string-not-empty (str (string-ascii 256)))
+  (if (> (len str) u0)
+    (ok true)
+    err-invalid-input
+  )
+)
+
 ;; public functions
+
+;; Pause/unpause contract (owner only)
+(define-public (pause-contract)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (var-set contract-paused true)
+    (ok true)
+  )
+)
+
+(define-public (unpause-contract)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (var-set contract-paused false)
+    (ok true)
+  )
+)
 
 ;; Mint original meme (generation 0)
 (define-public (mint-original-meme 
@@ -84,10 +162,13 @@
   (royalty-rate uint))
   (let
     (
-      (token-id (+ (var-get last-token-id) u1))
+      (token-id (unwrap! (safe-add (var-get last-token-id) u1) err-overflow))
       (creator tx-sender)
     )
-    ;; Validate royalty rate
+    ;; Security checks
+    (asserts! (not (var-get contract-paused)) err-contract-paused)
+    (try! (check-rate-limit creator))
+    (try! (validate-string-not-empty metadata-uri))
     (asserts! (<= royalty-rate max-royalty-rate) err-invalid-royalty)
     
     ;; Mint NFT
@@ -104,7 +185,7 @@
       viral-coefficient: u0,
       total-derivatives: u0,
       total-earned: u0,
-      created-at: stacks-block-height
+      created-at: burn-block-height
     })
     
     ;; Update user memes
@@ -127,14 +208,17 @@
   (royalty-rate uint))
   (let
     (
-      (token-id (+ (var-get last-token-id) u1))
+      (token-id (unwrap! (safe-add (var-get last-token-id) u1) err-overflow))
       (creator tx-sender)
       (parent-data (unwrap! (map-get? meme-data parent-id) err-token-not-found))
       (parent-generation (get generation parent-data))
-      (new-generation (+ parent-generation u1))
+      (new-generation (unwrap! (safe-add parent-generation u1) err-overflow))
       (payment-amount (get mint-price parent-data))
     )
-    ;; Validate parent exists and royalty rate
+    ;; Security checks
+    (asserts! (not (var-get contract-paused)) err-contract-paused)
+    (try! (check-rate-limit creator))
+    (try! (validate-string-not-empty metadata-uri))
     (asserts! (<= royalty-rate max-royalty-rate) err-invalid-royalty)
     (asserts! (> payment-amount u0) err-insufficient-payment)
     
@@ -158,7 +242,7 @@
       viral-coefficient: u0,
       total-derivatives: u0,
       total-earned: u0,
-      created-at: stacks-block-height
+      created-at: burn-block-height
     })
     
     ;; Update parent's children list
@@ -171,7 +255,7 @@
     ;; Update parent's derivative count and viral coefficient
     (map-set meme-data parent-id
       (merge parent-data {
-        total-derivatives: (+ (get total-derivatives parent-data) u1),
+        total-derivatives: (unwrap! (safe-add (get total-derivatives parent-data) u1) err-overflow),
         viral-coefficient: (calculate-viral-coefficient parent-id)
       }))
     
@@ -190,6 +274,7 @@
 ;; Transfer meme NFT
 (define-public (transfer-meme (token-id uint) (sender principal) (recipient principal))
   (begin
+    (asserts! (not (var-get contract-paused)) err-contract-paused)
     (asserts! (is-eq tx-sender sender) err-not-token-owner)
     (try! (nft-transfer? meme-nft token-id sender recipient))
     
@@ -307,6 +392,19 @@
   )
 )
 
+;; NEW: Security read-only functions
+(define-read-only (is-contract-paused)
+  (var-get contract-paused)
+)
+
+(define-read-only (get-last-operation-block (user principal))
+  (default-to u0 (map-get? last-operation-block user))
+)
+
+(define-read-only (get-operations-count (user principal) (block uint))
+  (default-to u0 (map-get? operations-per-block {user: user, block: block}))
+)
+
 ;; private functions
 
 ;; Distribute royalties (simplified: single-level payout to the current meme's creator)
@@ -314,8 +412,8 @@
   (let
     (
       (platform-treasury-addr (var-get platform-treasury))
-      (platform-fee-amount (/ (* payment platform-fee) fee-denominator))
-      (remaining-amount (- payment platform-fee-amount))
+      (platform-fee-amount (/ (unwrap! (safe-mul payment platform-fee) err-overflow) fee-denominator))
+      (remaining-amount (unwrap! (safe-sub payment platform-fee-amount) err-underflow))
       (maybe-data (map-get? meme-data meme-id))
     )
     ;; Pay platform fee
@@ -327,12 +425,12 @@
           (
             (creator (get creator data))
             (royalty-rate (get royalty-rate data))
-            (royalty-amount (/ (* remaining-amount royalty-rate) fee-denominator))
+            (royalty-amount (/ (unwrap! (safe-mul remaining-amount royalty-rate) err-overflow) fee-denominator))
           )
           (if (and (> royalty-amount u0) (not (is-eq creator payer)))
             (begin
               (try! (stx-transfer? royalty-amount payer creator))
-              (map-set meme-data meme-id (merge data {total-earned: (+ (get total-earned data) royalty-amount)}))
+              (map-set meme-data meme-id (merge data {total-earned: (unwrap! (safe-add (get total-earned data) royalty-amount) err-overflow)}))
               (ok true)
             )
             (ok true)
