@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MemeTree Dashboard</title>
+    <script src="https://unpkg.com/@stacks/connect@7.7.1/lib/index.js"></script>
+    <script src="https://unpkg.com/@stacks/transactions@6.11.0/lib/index.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            border-left: 4px solid #667eea;
+        }
+        .card h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #5a6fd8;
+        }
+        .meme-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .meme-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            background: white;
+        }
+        .meme-card h4 {
+            margin-top: 0;
+            color: #333;
+        }
+        .stats {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+        .stat {
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .connect-wallet {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .wallet-info {
+            background: #e8f4fd;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌳 MemeTree Dashboard</h1>
+
+        <div id="wallet-section" class="connect-wallet">
+            <button id="connect-wallet" onclick="connectWallet()">Connect Wallet</button>
+            <div id="wallet-info" class="wallet-info" style="display: none;"></div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="card">
+                <h3>📊 Platform Stats</h3>
+                <div class="stats">
+                    <div class="stat">
+                        <div>Total Memes</div>
+                        <div id="total-memes" class="stat-value">-</div>
+                    </div>
+                    <div class="stat">
+                        <div>Platform Fee</div>
+                        <div id="platform-fee" class="stat-value">-</div>
+                    </div>
+                    <div class="stat">
+                        <div>Emergency Mode</div>
+                        <div id="emergency-mode" class="stat-value">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>🎨 Mint Original Meme</h3>
+                <form id="mint-form">
+                    <div class="form-group">
+                        <label for="metadata-uri">Metadata URI:</label>
+                        <input type="url" id="metadata-uri" placeholder="https://example.com/meme.json" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="mint-price">Mint Price (STX):</label>
+                        <input type="number" id="mint-price" step="0.000001" min="0.01" placeholder="1.0" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="royalty-rate">Royalty Rate (%):</label>
+                        <input type="number" id="royalty-rate" min="0" max="10" step="0.1" placeholder="5.0" required>
+                    </div>
+                    <button type="submit">Mint Meme</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3>🔄 Mint Derivative Meme</h3>
+                <form id="derivative-form">
+                    <div class="form-group">
+                        <label for="parent-id">Parent Meme ID:</label>
+                        <input type="number" id="parent-id" min="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="deriv-metadata-uri">Metadata URI:</label>
+                        <input type="url" id="deriv-metadata-uri" placeholder="https://example.com/derivative.json" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="deriv-mint-price">Mint Price (STX):</label>
+                        <input type="number" id="deriv-mint-price" step="0.000001" min="0.01" placeholder="2.0" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="deriv-royalty-rate">Royalty Rate (%):</label>
+                        <input type="number" id="deriv-royalty-rate" min="0" max="10" step="0.1" placeholder="3.0" required>
+                    </div>
+                    <button type="submit">Mint Derivative</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3>🔍 View Meme</h3>
+                <form id="view-form">
+                    <div class="form-group">
+                        <label for="view-token-id">Token ID:</label>
+                        <input type="number" id="view-token-id" min="1" required>
+                    </div>
+                    <button type="submit">View Meme</button>
+                </form>
+                <div id="meme-details" style="margin-top: 15px;"></div>
+            </div>
+
+            <div class="card">
+                <h3>📤 Transfer Meme</h3>
+                <form id="transfer-form">
+                    <div class="form-group">
+                        <label for="transfer-token-id">Token ID:</label>
+                        <input type="number" id="transfer-token-id" min="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="recipient">Recipient Address:</label>
+                        <input type="text" id="recipient" placeholder="ST..." required>
+                    </div>
+                    <button type="submit">Transfer</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>🖼️ Your Memes</h3>
+            <button onclick="loadUserMemes()">Load My Memes</button>
+            <div id="user-memes" class="meme-list"></div>
+        </div>
+    </div>
+
+    <script>
+        let userSession = null;
+        const contractAddress = 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM'; // Update with actual contract address
+        const contractName = 'MemeTreecontract';
+
+        // Initialize Stacks Connect
+        const appConfig = new AppConfig(['store_write', 'publish_data']);
+        userSession = new UserSession({ appConfig });
+
+        async function connectWallet() {
+            if (!userSession.isUserSignedIn()) {
+                userSession.redirectToSignIn();
+            } else {
+                showWalletInfo();
+                loadPlatformStats();
+            }
+        }
+
+        function showWalletInfo() {
+            const walletInfo = document.getElementById('wallet-info');
+            const userData = userSession.loadUserData();
+            walletInfo.innerHTML = `
+                <strong>Connected:</strong> ${userData.profile.stxAddress.testnet}<br>
+                <strong>Balance:</strong> Loading...
+            `;
+            walletInfo.style.display = 'block';
+            document.getElementById('connect-wallet').style.display = 'none';
+        }
+
+        async function loadPlatformStats() {
+            try {
+                const lastTokenId = await callReadOnly('get-last-token-id', []);
+                document.getElementById('total-memes').textContent = lastTokenId;
+
+                const platformFee = await callReadOnly('get-platform-fee-constant', []);
+                document.getElementById('platform-fee').textContent = (platformFee / 100) + '%';
+
+                const emergencyMode = await callReadOnly('is-emergency-mode', []);
+                document.getElementById('emergency-mode').textContent = emergencyMode ? 'Active' : 'Inactive';
+            } catch (error) {
+                console.error('Error loading platform stats:', error);
+            }
+        }
+
+        async function callReadOnly(functionName, args) {
+            const network = new StacksTestnet();
+            const callReadOnlyFn = await stacksConnect.callReadOnlyFn({
+                network,
+                contractAddress,
+                contractName,
+                functionName,
+                functionArgs: args,
+                senderAddress: userSession.loadUserData().profile.stxAddress.testnet,
+            });
+            return callReadOnlyFn.result;
+        }
+
+        async function callPublic(functionName, args) {
+            const network = new StacksTestnet();
+            const options = {
+                network,
+                contractAddress,
+                contractName,
+                functionName,
+                functionArgs: args,
+                appDetails: {
+                    name: 'MemeTree Dashboard',
+                    icon: window.location.origin + '/favicon.ico',
+                },
+                onFinish: (data) => {
+                    console.log('Transaction finished:', data);
+                    alert('Transaction submitted successfully!');
+                    loadPlatformStats(); // Refresh stats
+                },
+                onCancel: () => {
+                    alert('Transaction cancelled');
+                },
+            };
+            await stacksConnect.openContractCall(options);
+        }
+
+        // Form handlers
+        document.getElementById('mint-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const metadataUri = document.getElementById('metadata-uri').value;
+            const mintPrice = Math.floor(parseFloat(document.getElementById('mint-price').value) * 1000000); // Convert to microSTX
+            const royaltyRate = Math.floor(parseFloat(document.getElementById('royalty-rate').value) * 100); // Convert to basis points
+
+            await callPublic('mint-original-meme', [
+                stacksConnect.stringAsciiCV(metadataUri),
+                stacksConnect.uintCV(mintPrice),
+                stacksConnect.uintCV(royaltyRate)
+            ]);
+        });
+
+        document.getElementById('derivative-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const parentId = parseInt(document.getElementById('parent-id').value);
+            const metadataUri = document.getElementById('deriv-metadata-uri').value;
+            const mintPrice = Math.floor(parseFloat(document.getElementById('deriv-mint-price').value) * 1000000);
+            const royaltyRate = Math.floor(parseFloat(document.getElementById('deriv-royalty-rate').value) * 100);
+
+            await callPublic('mint-derivative-meme', [
+                stacksConnect.uintCV(parentId),
+                stacksConnect.stringAsciiCV(metadataUri),
+                stacksConnect.uintCV(mintPrice),
+                stacksConnect.uintCV(royaltyRate)
+            ]);
+        });
+
+        document.getElementById('view-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const tokenId = parseInt(document.getElementById('view-token-id').value);
+
+            try {
+                const memeData = await callReadOnly('get-meme-data', [stacksConnect.uintCV(tokenId)]);
+                const viralCoeff = await callReadOnly('get-viral-coefficient', [stacksConnect.uintCV(tokenId)]);
+
+                document.getElementById('meme-details').innerHTML = `
+                    <h4>Meme #${tokenId}</h4>
+                    <p><strong>Creator:</strong> ${memeData.creator}</p>
+                    <p><strong>Generation:</strong> ${memeData.generation}</p>
+                    <p><strong>Mint Price:</strong> ${(memeData.mint_price / 1000000).toFixed(6)} STX</p>
+                    <p><strong>Royalty Rate:</strong> ${(memeData.royalty_rate / 100).toFixed(1)}%</p>
+                    <p><strong>Viral Coefficient:</strong> ${viralCoeff}</p>
+                    <p><strong>Total Derivatives:</strong> ${memeData.total_derivatives}</p>
+                    <p><strong>Total Earned:</strong> ${(memeData.total_earned / 1000000).toFixed(6)} STX</p>
+                    <p><strong>Created:</strong> Block ${memeData.created_at}</p>
+                `;
+            } catch (error) {
+                document.getElementById('meme-details').innerHTML = '<p style="color: red;">Error loading meme data</p>';
+                console.error(error);
+            }
+        });
+
+        document.getElementById('transfer-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const tokenId = parseInt(document.getElementById('transfer-token-id').value);
+            const recipient = document.getElementById('recipient').value;
+
+            await callPublic('transfer-meme', [
+                stacksConnect.uintCV(tokenId),
+                `'${userSession.loadUserData().profile.stxAddress.testnet}'`,
+                `'${recipient}'`
+            ]);
+        });
+
+        async function loadUserMemes() {
+            try {
+                const userAddress = userSession.loadUserData().profile.stxAddress.testnet;
+                const userMemes = await callReadOnly('get-user-memes', [`'${userAddress}'`]);
+
+                const memesContainer = document.getElementById('user-memes');
+                memesContainer.innerHTML = '';
+
+                for (const memeId of userMemes) {
+                    const memeData = await callReadOnly('get-meme-data', [stacksConnect.uintCV(memeId)]);
+                    const viralCoeff = await callReadOnly('get-viral-coefficient', [stacksConnect.uintCV(memeId)]);
+
+                    const memeCard = document.createElement('div');
+                    memeCard.className = 'meme-card';
+                    memeCard.innerHTML = `
+                        <h4>Meme #${memeId}</h4>
+                        <p>Generation: ${memeData.generation}</p>
+                        <p>Viral Coefficient: ${viralCoeff}</p>
+                        <p>Earned: ${(memeData.total_earned / 1000000).toFixed(6)} STX</p>
+                        <button onclick="viewMeme(${memeId})">View Details</button>
+                    `;
+                    memesContainer.appendChild(memeCard);
+                }
+            } catch (error) {
+                console.error('Error loading user memes:', error);
+            }
+        }
+
+        function viewMeme(tokenId) {
+            document.getElementById('view-token-id').value = tokenId;
+            document.getElementById('view-form').dispatchEvent(new Event('submit'));
+        }
+
+        // Check if user is already signed in
+        if (userSession.isUserSignedIn()) {
+            showWalletInfo();
+            loadPlatformStats();
+        }
+    </script>
+</body>
+</html>
